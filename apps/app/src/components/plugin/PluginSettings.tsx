@@ -254,6 +254,12 @@ export function PluginSettingsForm({ pluginId }: { pluginId: string }) {
   }
   const hasChanges = Object.keys(changedValues).length > 0;
 
+  // DwarfStar manages its active model via the custom picker on top; hide the duplicate dropdown.
+  const entries =
+    pluginId === "ds4"
+      ? Object.entries(view.schema).filter(([key]) => key !== "modelPreset")
+      : Object.entries(view.schema);
+
   return (
     <form
       className="space-y-4"
@@ -262,7 +268,7 @@ export function PluginSettingsForm({ pluginId }: { pluginId: string }) {
         if (hasChanges) save.mutate(changedValues);
       }}
     >
-      {Object.entries(view.schema).map(([key, descriptor]) => (
+      {entries.map(([key, descriptor]) => (
         <SettingsWithControl
           key={key}
           label={descriptor.label}
@@ -387,6 +393,30 @@ export function PluginSettingsDetail({ plugin }: { plugin: PluginListItem }) {
   const settingsAvailable =
     plugin.enabled && PLUGIN_STATUSES_WITH_SETTINGS.includes(plugin.status);
   if (!plugin.hasSettings && !hasSettingsSections) return null;
+
+  // DwarfStar: active model picker should sit on top of the configuration form.
+  if (plugin.id === "ds4") {
+    return (
+      <div className="space-y-6" data-testid={`plugin-detail-${plugin.id}`}>
+        {settingsAvailable ? (
+          <PluginSettingsSections pluginId={plugin.id} />
+        ) : null}
+        {plugin.hasSettings || !settingsAvailable ? (
+          <ResourceDetailPanel surface="recessed" className="px-3 py-3">
+            {settingsAvailable ? (
+              <PluginSettingsForm key={plugin.id} pluginId={plugin.id} />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {plugin.enabled
+                  ? `Settings are unavailable while the plugin is ${plugin.status}.`
+                  : "Enable this plugin to edit its settings."}
+              </p>
+            )}
+          </ResourceDetailPanel>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6" data-testid={`plugin-detail-${plugin.id}`}>
