@@ -10,6 +10,7 @@ import {
 } from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { DropdownMenu, DropdownMenuContent } from "@bb/shared-ui/dropdown-menu";
+import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
 
 const LONG_PRESS_MS = 700;
 const LONG_PRESS_MOVE_SLOP_PX = 10;
@@ -151,25 +152,27 @@ export function CompactLongPressMenu({
   );
 
   return (
-    <>
-      <Slot
-        style={LONG_PRESS_TARGET_STYLE}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerEnd}
-        onPointerCancel={handlePointerEnd}
-        onContextMenu={handleContextMenu}
-        onClickCapture={handleClickCapture}
-      >
-        {children}
-      </Slot>
-      {hasOpened ? (
-        <DropdownMenu open={open} onOpenChange={handleOpenChange}>
-          <DropdownMenuContent mobileTitle={label} aria-label={label}>
-            {items}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
-    </>
+    <CompactViewportOverrideProvider isCompactViewport>
+      <>
+        <Slot
+          style={LONG_PRESS_TARGET_STYLE}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+          onContextMenu={handleContextMenu}
+          onClickCapture={handleClickCapture}
+        >
+          {children}
+        </Slot>
+        {hasOpened ? (
+          <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+            <DropdownMenuContent mobileTitle={label} aria-label={label}>
+              {items}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+      </>
+    </CompactViewportOverrideProvider>
   );
 }

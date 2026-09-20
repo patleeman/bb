@@ -19,6 +19,7 @@ import { Button } from "@bb/shared-ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
 import { COARSE_POINTER_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { CompactLongPressMenu } from "@/components/ui/compact-long-press-menu";
 import { isThreadRead } from "@bb/client-core";
@@ -334,7 +335,8 @@ export function ThreadActionsMenu({
 
 export function ThreadActionsContextMenu(props: ThreadActionsContextMenuProps) {
   const isCompactViewport = useIsCompactViewport();
-  if (isCompactViewport) {
+  const isPointerCoarse = usePointerCoarse();
+  if (isCompactViewport || isPointerCoarse) {
     return <ThreadActionsCompactLongPressMenu {...props} />;
   }
   return <ThreadActionsDesktopContextMenu {...props} />;

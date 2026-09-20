@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@bb/shared-ui/dropdown-menu";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
 import { CompactLongPressMenu } from "@/components/ui/compact-long-press-menu";
 import { usePathPickerHost } from "@/hooks/useLocalPathPicker";
 import { getProjectSettingsRoutePath } from "@/lib/route-paths";
@@ -214,7 +215,8 @@ export function ProjectActionsContextMenu(
   props: ProjectActionsContextMenuProps,
 ) {
   const isCompactViewport = useIsCompactViewport();
-  if (isCompactViewport) {
+  const isPointerCoarse = usePointerCoarse();
+  if (isCompactViewport || isPointerCoarse) {
     return <ProjectActionsCompactLongPressMenu {...props} />;
   }
   return <ProjectActionsDesktopContextMenu {...props} />;
