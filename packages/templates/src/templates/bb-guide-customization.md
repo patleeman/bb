@@ -250,10 +250,11 @@ windows must stay open; browser permission is requested in the plugin settings.
 
   bb push-notifications list
   bb push-notifications add --token <expo-push-token>
-      --platform <ios|android> --label <device-name>
+      --platform <ios|android> --label <device-name> [--server-url <url>]
   bb push-notifications remove <id>
   bb push-notifications status
   bb push-notifications test <web|desktop>
+  bb push-notifications enqueue --plugin <source-plugin-id> --event <event-id>
   bb plugin config push-notifications set <mobileEnabled|webEnabled|desktopEnabled> <true|false>
 
 `add` is an upsert by token: a known token refreshes its label and last-seen
@@ -265,6 +266,10 @@ config push-notifications set expoPushUrl <url>`. Add `--json` to `list` or
 The three channel switches default to true and apply immediately across this
 server. `test` broadcasts to all connected clients of the selected type with
 permission; OS notification settings still control whether a banner appears.
+
+Plugin notification sources can queue durable events through `notifications.enqueue`; the sender calls the source plugin’s `notifications.resolve` RPC just before delivery. These use the same notification switches as thread events. See the Push notifications plugin overview for the source contract and channel links.
+
+Device registration accepts `--server-url <url>` for notification links, including channel errors without a backing thread. Mobile clients send their profile URL automatically.
 
 Host files and voice transcription
 

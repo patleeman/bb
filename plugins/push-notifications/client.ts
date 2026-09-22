@@ -25,7 +25,10 @@ export function notificationPermission():
     : Notification.permission;
 }
 
-export function createClientDelivery(navigate: (threadId: string) => void) {
+export function createClientDelivery(
+  navigate: (threadId: string) => void,
+  navigatePath: (path: string) => void = (path) => window.location.assign(path),
+) {
   const active = new Set<Notification>();
   let disposed = false;
 
@@ -42,14 +45,15 @@ export function createClientDelivery(navigate: (threadId: string) => void) {
       ...(isMacDesktop
         ? {}
         : { icon: new URL("/icon-192.png", window.location.origin).href }),
-      tag: `bb-${message.threadId ?? message.id}`,
+      tag: `bb-${message.groupId ?? message.path ?? message.threadId ?? message.id}`,
     });
     active.add(notification);
     notification.onclose = () => active.delete(notification);
     notification.onclick = () => {
       if (disposed) return;
       window.focus();
-      if (message.threadId !== null) navigate(message.threadId);
+      if (message.path) navigatePath(message.path);
+      else if (message.threadId !== null) navigate(message.threadId);
       notification.close();
       active.delete(notification);
     };

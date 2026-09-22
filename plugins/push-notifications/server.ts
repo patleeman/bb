@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import {
   addPushSubscriptionInputSchema,
+  enqueueNotificationSchema,
   CLIENT_NOTIFICATION_CHANNEL,
   clientChannelSchema,
   DEFAULT_EXPO_PUSH_URL,
@@ -165,7 +166,7 @@ export function createPushNotificationsPlugin(
       bb.realtime.publish(CLIENT_NOTIFICATION_CHANNEL, {
         id: randomUUID(),
         title: "bb notifications are working",
-        body: "You’ll be notified when a thread needs your attention.",
+        body: "You’ll be notified when a thread or channel needs your attention.",
         threadId: null,
         channels: [channel],
       } satisfies ClientNotification);
@@ -173,6 +174,8 @@ export function createPushNotificationsPlugin(
     }
 
     bb.rpc.register(pushNotificationsRpcContract, {
+      "notifications.enqueue": ({ pluginId, eventId }) =>
+        sender.enqueue(pluginId, eventId),
       "notifications.test": ({ channel }) => sendTest(channel),
       "pushSubscriptions.list": async () => ({
         subscriptions: await subscriptions.listSummaries(),
@@ -193,6 +196,36 @@ export function createPushNotificationsPlugin(
         description:
           "Mobile devices receive Expo push messages; web and desktop clients receive system notifications while they are open.",
         commands: {
+          enqueue: cliCommand({
+            summary:
+              "Queue a notification from a plugin's notifications.resolve RPC",
+            options: {
+              plugin: {
+                type: "string",
+                required: true,
+                description: "Source plugin id",
+              },
+              event: {
+                type: "string",
+                required: true,
+                description: "Durable source event id",
+              },
+              json: JSON_OPTION,
+            },
+            async run(input) {
+              const source = enqueueNotificationSchema.parse({
+                pluginId: input.options.plugin,
+                eventId: input.options.event,
+              });
+              const result = sender.enqueue(source.pluginId, source.eventId);
+              return {
+                exitCode: 0,
+                stdout: input.options.json
+                  ? JSON.stringify(result)
+                  : "Notification queued",
+              };
+            },
+          }),
           test: cliCommand({
             summary:
               "Send a test to connected web or desktop clients with permission",
@@ -249,6 +282,11 @@ export function createPushNotificationsPlugin(
           add: cliCommand({
             summary: "Register or refresh an Expo push device",
             options: {
+              "server-url": {
+                type: "string",
+                description:
+                  "Server URL used by this device, for notification links",
+              },
               token: {
                 type: "string",
                 required: true,
@@ -275,6 +313,9 @@ export function createPushNotificationsPlugin(
             async run(input) {
               const parsed = addPushSubscriptionInputSchema.safeParse({
                 expoPushToken: input.options.token,
+                ...(input.options["server-url"]
+                  ? { serverUrl: input.options["server-url"] }
+                  : {}),
                 platform: input.options.platform,
                 deviceLabel: input.options.label,
               });

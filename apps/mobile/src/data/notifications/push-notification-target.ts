@@ -1,3 +1,4 @@
+import { getThreadRoutePath } from "@bb/client-core";
 import { z } from "zod";
 import {
   matchProfileForWebLink,
@@ -5,17 +6,34 @@ import {
 } from "@/lib/links/incoming-link";
 
 export interface PushNotificationTarget {
-  threadId: string;
+  threadId: string | null;
   projectId: string | null;
   serverUrl: string | null;
+  path?: string;
 }
 
-const pushDataSchema = z.object({
-  threadId: z.string().min(1),
-  projectId: z.string().min(1).nullish(),
-  serverUrl: z.string().min(1).nullish(),
-  url: z.string().min(1).nullish(),
-});
+const pushDataSchema = z
+  .object({
+    threadId: z.string().min(1).nullish(),
+    path: z
+      .string()
+      .regex(
+        /^\/plugins\/[a-z0-9][a-z0-9-]*\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_%:.-]+)*$/u,
+      )
+      .refine((path) =>
+        path
+          .split("/")
+          .every(
+            (part) =>
+              part !== "." && part !== ".." && !/%(?:2e|2f|5c)/iu.test(part),
+          ),
+      )
+      .optional(),
+    projectId: z.string().min(1).nullish(),
+    serverUrl: z.string().min(1).nullish(),
+    url: z.string().min(1).nullish(),
+  })
+  .refine((value) => value.threadId != null || value.path !== undefined);
 
 function normalizedHint(value: string, preservePath: boolean): string | null {
   try {
@@ -35,7 +53,8 @@ export function parsePushNotificationData(
   const serverUrl = parsed.data.serverUrl ?? null;
   const fallbackUrl = parsed.data.url ?? null;
   return {
-    threadId: parsed.data.threadId,
+    threadId: parsed.data.threadId ?? null,
+    ...(parsed.data.path ? { path: parsed.data.path } : {}),
     projectId: parsed.data.projectId ?? null,
     serverUrl: serverUrl
       ? normalizedHint(serverUrl, true)
@@ -68,6 +87,7 @@ export async function resolvePushTargetProfile(
       if (match) return match.profile;
     } catch {}
   }
+  if (target.threadId === null) return null;
   const ordered = [
     ...profiles.filter((profile) => profile.id === deps.activeProfileId),
     ...profiles.filter((profile) => profile.id !== deps.activeProfileId),
@@ -80,4 +100,15 @@ export async function resolvePushTargetProfile(
     } catch {}
   }
   return null;
+}
+
+export function pushNotificationRoute(target: PushNotificationTarget): string {
+  if (target.path) return target.path;
+  if (!target.threadId) throw new Error("Notification has no destination");
+  return target.projectId === null
+    ? `/threads/${encodeURIComponent(target.threadId)}`
+    : getThreadRoutePath({
+        projectId: target.projectId,
+        threadId: target.threadId,
+      });
 }

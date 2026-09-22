@@ -1,11 +1,11 @@
 import * as Notifications from "expo-notifications";
-import { getThreadRoutePath } from "@bb/client-core";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { useProfiles, useRealtimeConnectionState } from "@/app-shell";
 import {
   parsePushNotificationData,
+  pushNotificationRoute,
   resolvePushTargetProfile,
   isPushRegistrationAllowed,
   type PushNotificationTarget,
@@ -59,7 +59,7 @@ export function PushNotificationsHost() {
         hasThread: hasThreadOnServer,
       });
       if (!profile) {
-        toast.error("Could not open the thread", {
+        toast.error("Could not open the notification", {
           description: "None of your saved servers has it.",
         });
         return;
@@ -67,13 +67,7 @@ export function PushNotificationsHost() {
       router.push(
         webViewShellHref({
           profileId: profile.id,
-          path:
-            target.projectId === null
-              ? `/threads/${target.threadId}`
-              : getThreadRoutePath({
-                  projectId: target.projectId,
-                  threadId: target.threadId,
-                }),
+          path: pushNotificationRoute(target),
         }),
       );
     },
@@ -181,8 +175,8 @@ function FirstRunPrompt({
   return (
     <ActionSheet
       controller={sheet}
-      title="Get notified when a thread needs you?"
-      message="bb can send a push notification when a thread finishes, hits an error, or is waiting for your input. You can change this per server in Settings."
+      title="Get notified when an agent needs you?"
+      message="bb can send a push notification when a thread or channel response finishes, hits an error, or is waiting for your input. You can change this per server in Settings."
       actions={[
         {
           key: "enable",

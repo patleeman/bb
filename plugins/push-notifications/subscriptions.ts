@@ -10,7 +10,9 @@ import {
 const SUBSCRIPTION_KEY_PREFIX = "subscription:";
 
 export interface PushSubscriptionStore {
-  add(input: AddPushSubscriptionInput): Promise<{ id: string; created: boolean }>;
+  add(
+    input: AddPushSubscriptionInput,
+  ): Promise<{ id: string; created: boolean }>;
   list(): Promise<PushSubscription[]>;
   listSummaries(): Promise<PushSubscriptionSummary[]>;
   remove(id: string): Promise<boolean>;
@@ -59,13 +61,13 @@ export function createPushSubscriptionStore(
       return mutate(async () => {
         const subscriptions = await readAll();
         const existing = subscriptions.find(
-          (subscription) =>
-            subscription.expoPushToken === input.expoPushToken,
+          (subscription) => subscription.expoPushToken === input.expoPushToken,
         );
         const timestamp = now();
         if (existing) {
           const updated: PushSubscription = {
             ...existing,
+            ...(input.serverUrl ? { serverUrl: input.serverUrl } : {}),
             deviceLabel: input.deviceLabel,
             platform: input.platform,
             lastSeenAt: Math.max(timestamp, existing.lastSeenAt),
@@ -80,6 +82,7 @@ export function createPushSubscriptionStore(
         const created: PushSubscription = {
           id,
           expoPushToken: input.expoPushToken,
+          ...(input.serverUrl ? { serverUrl: input.serverUrl } : {}),
           platform: input.platform,
           deviceLabel: input.deviceLabel,
           createdAt: timestamp,
@@ -96,10 +99,12 @@ export function createPushSubscriptionStore(
     async listSummaries() {
       await mutationQueue;
       const subscriptions = await readAll();
-      return subscriptions.map(({ expoPushToken, ...subscription }) => ({
-        ...subscription,
-        tokenSuffix: expoPushToken.slice(-6),
-      }));
+      return subscriptions.map(
+        ({ expoPushToken, serverUrl: _serverUrl, ...subscription }) => ({
+          ...subscription,
+          tokenSuffix: expoPushToken.slice(-6),
+        }),
+      );
     },
     remove(id) {
       return mutate(async () => {

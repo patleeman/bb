@@ -61,7 +61,7 @@ function NotificationSettings() {
         ? "Notifications are blocked. Allow them in your browser or system notification settings, then return here."
         : permission === "granted"
           ? "Notifications allowed. Your system notification settings also apply."
-          : "Allow notifications on this device to receive thread updates.";
+          : "Allow notifications on this device to receive thread and channel updates.";
 
   async function requestPermission() {
     setBusy(true);
@@ -130,8 +130,8 @@ function NotificationSettings() {
         </p>
       ) : null}
       <p className="text-xs text-muted-foreground">
-        Channel settings apply to this bb server. Each browser needs permission.
-        Click a notification to open its thread.
+        Delivery settings apply to this bb server. Each browser needs
+        permission. Click a notification to open its thread or channel.
       </p>
     </div>
   );

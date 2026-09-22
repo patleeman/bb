@@ -1,6 +1,7 @@
 export type { PushPlatform } from "./push-contract";
 export {
   parsePushNotificationData,
+  pushNotificationRoute,
   resolvePushTargetProfile,
   type PushNotificationTarget,
 } from "./push-notification-target";

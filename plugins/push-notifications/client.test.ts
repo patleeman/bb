@@ -106,3 +106,28 @@ describe("client system notifications", () => {
     delivery.dispose();
   });
 });
+
+it("opens a channel permalink instead of its hidden backing thread", async () => {
+  const thread = vi.fn(),
+    panel = vi.fn();
+  const delivery = createClientDelivery(thread, panel);
+  const path = "/plugins/bots/channels/room-1/message/job%3A1";
+  await delivery.deliver({ ...message, path }, true);
+  TestNotification.instances[0]?.onclick?.();
+  expect(panel).toHaveBeenCalledWith(path);
+  expect(thread).not.toHaveBeenCalled();
+  delivery.dispose();
+});
+
+it.each([
+  "https://evil.test",
+  "//evil.test",
+  "/plugins/bots/../other",
+  "/plugins/bots/channels/%2e%2e",
+  "/plugins/bots/channels/a%2fb",
+])("rejects invalid navigation target %s", async (path) => {
+  const delivery = createClientDelivery(vi.fn(), vi.fn());
+  await delivery.deliver({ ...message, path }, true);
+  expect(TestNotification.instances).toHaveLength(0);
+  delivery.dispose();
+});

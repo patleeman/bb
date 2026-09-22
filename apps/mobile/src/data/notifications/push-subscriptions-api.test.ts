@@ -42,6 +42,7 @@ describe("createPushSubscriptionsApi", () => {
           expoPushToken: "ExponentPushToken[abc]",
           platform: "ios",
           deviceLabel: "Sawyer's iPhone",
+          serverUrl: "https://bee.getbb.app/",
         }),
       }),
     );
@@ -90,4 +91,36 @@ describe("createPushSubscriptionsApi", () => {
       ).rejects.toThrow(PUSH_NOTIFICATIONS_PLUGIN_DISABLED_STATUS);
     },
   );
+});
+
+it("registers on older servers that do not accept a device server URL", async () => {
+  const fetchImpl = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      jsonResponse(400, {
+        ok: false,
+        error: {
+          code: "invalid_input",
+          message: "Unrecognized key: serverUrl",
+        },
+      }),
+    )
+    .mockResolvedValueOnce(
+      jsonResponse(200, { ok: true, result: { id: "legacy", created: true } }),
+    );
+  const api = createPushSubscriptionsApi(fetchImpl);
+  await expect(
+    api.register("https://bb.example.test", {
+      expoPushToken: "token",
+      platform: "ios",
+      deviceLabel: "Phone",
+    }),
+  ).resolves.toEqual({ subscriptionId: "legacy" });
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).serverUrl).toBe(
+    "https://bb.example.test",
+  );
+  expect(
+    JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body)),
+  ).not.toHaveProperty("serverUrl");
 });

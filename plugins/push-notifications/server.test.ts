@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { PluginThreadEventPayloads } from "@get-bb/plugin-sdk";
 import {
   createFakePluginHost,
@@ -401,6 +402,7 @@ describe("push sender", () => {
 
       await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
       expect(host.expo.requests[0]?.[0]?.data).toEqual({
+        id: expect.any(String),
         kind: "turn-finished",
         projectId: "project-1",
         serverUrl: "https://bb.example.test",
@@ -690,4 +692,143 @@ describe("web and desktop delivery", () => {
       await host.cleanup();
     }
   });
+});
+
+describe("plugin source notifications", () => {
+  it("shares delivery settings, mobile server hints, and stable event deduplication", async () => {
+    const host = await setup({ appUrl: "https://bb.example.test" });
+    try {
+      await host.addSubscription();
+      host.harness.inspection.sdk.stub(
+        "plugins.callRpc",
+        async <T>(args: { outputSchema: z.ZodType<T> }) =>
+          args.outputSchema.parse({
+            title: "#Research · Atlas",
+            body: "The report is ready",
+            kind: "turn-finished",
+            threadId: "hidden-work",
+            projectId: "project-1",
+            path: "/plugins/bots/channels/room-1/message/job-1",
+          }),
+      );
+      const event = { pluginId: "bots", eventId: "reply:job-1" };
+      await host.harness.behavior.callRpc("notifications.enqueue", event);
+      await host.harness.behavior.callRpc("notifications.enqueue", event);
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.requests[0]?.[0]?.data).toMatchObject({
+        id: "plugin:bots:reply:job-1",
+        threadId: "hidden-work",
+        serverUrl: "https://bb.example.test",
+        path: "/plugins/bots/channels/room-1/message/job-1",
+      });
+      expect(host.harness.realtimeSignals.at(-1)?.payload).toMatchObject({
+        channels: ["web", "desktop"],
+        id: "plugin:bots:reply:job-1",
+      });
+      await host.harness.behavior.callRpc("notifications.enqueue", event);
+      await waitForCoalesce();
+      expect(host.expo.requests).toHaveLength(1);
+      await host.harness.behavior.setSettings({
+        mobileEnabled: false,
+        webEnabled: false,
+      });
+      await host.harness.behavior.runCli([
+        "enqueue",
+        "--plugin",
+        "bots",
+        "--event",
+        "reply:job-2",
+      ]);
+      await vi.waitFor(() =>
+        expect(host.harness.realtimeSignals).toHaveLength(2),
+      );
+      expect(host.harness.realtimeSignals.at(-1)?.payload).toMatchObject({
+        channels: ["desktop"],
+      });
+      expect(host.expo.requests).toHaveLength(1);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("rechecks source state at delivery and rejects paths outside its plugin", async () => {
+    const host = await setup();
+    try {
+      host.harness.inspection.sdk.stub(
+        "plugins.callRpc",
+        async <T>(args: { outputSchema: z.ZodType<T> }) =>
+          args.outputSchema.parse(null),
+      );
+      await host.harness.behavior.callRpc("notifications.enqueue", {
+        pluginId: "bots",
+        eventId: "read",
+      });
+      await waitForCoalesce();
+      expect(host.harness.realtimeSignals).toHaveLength(0);
+      host.harness.inspection.sdk.stub(
+        "plugins.callRpc",
+        async <T>(args: { outputSchema: z.ZodType<T> }) =>
+          args.outputSchema.parse({
+            title: "Invalid",
+            body: "",
+            kind: "turn-finished",
+            threadId: "t",
+            projectId: "p",
+            path: "/plugins/other/panel",
+          }),
+      );
+      await host.harness.behavior.callRpc("notifications.enqueue", {
+        pluginId: "bots",
+        eventId: "wrong-path",
+      });
+      await waitForCoalesce();
+      expect(host.harness.realtimeSignals).toHaveLength(0);
+      expect(
+        host.harness.inspection.sdk.callsTo("plugins.callRpc"),
+      ).toHaveLength(2);
+    } finally {
+      await host.cleanup();
+    }
+  });
+});
+
+it("uses each device's server URL for channel errors without a work thread", async () => {
+  const host = await setup({ appUrl: null });
+  try {
+    await host.harness.behavior.callRpc("pushSubscriptions.add", {
+      expoPushToken: "token",
+      platform: "ios",
+      deviceLabel: "Phone",
+      serverUrl: "http://192.168.1.20:3000",
+    });
+    host.harness.inspection.sdk.stub(
+      "plugins.callRpc",
+      async <T>(args: { outputSchema: z.ZodType<T> }) =>
+        args.outputSchema.parse({
+          title: "#Research",
+          body: "Dispatch failed",
+          kind: "thread-error",
+          threadId: null,
+          projectId: "p",
+          path: "/plugins/bots/channels/room",
+        }),
+    );
+    await host.harness.behavior.callRpc("notifications.enqueue", {
+      pluginId: "bots",
+      eventId: "error",
+    });
+    await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+    expect(host.expo.requests[0]?.[0]?.data).toMatchObject({
+      threadId: null,
+      path: "/plugins/bots/channels/room",
+      serverUrl: "http://192.168.1.20:3000",
+    });
+    const listed = await host.harness.behavior.callRpc(
+      "pushSubscriptions.list",
+      {},
+    );
+    expect(JSON.stringify(listed)).not.toContain("serverUrl");
+  } finally {
+    await host.cleanup();
+  }
 });

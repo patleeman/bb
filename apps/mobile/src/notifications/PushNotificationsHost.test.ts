@@ -13,7 +13,9 @@ interface NotificationResponse {
 const mocks = vi.hoisted(() => ({
   addTokenListener: vi.fn(() => () => undefined),
   clearLastNotificationResponse: vi.fn(),
-  getLastNotificationResponse: vi.fn(() => null),
+  getLastNotificationResponse: vi.fn<() => NotificationResponse | null>(
+    () => null,
+  ),
   push: vi.fn(),
   responseListener: vi.fn<(response: NotificationResponse) => void>(),
   setNotificationHandler: vi.fn(),
@@ -146,3 +148,44 @@ describe("PushNotificationsHost", () => {
     );
   });
 });
+
+it.each(["live", "cold start"])(
+  "opens a channel permalink on %s notification taps",
+  async (mode) => {
+    vi.clearAllMocks();
+    const response = {
+      notification: {
+        request: {
+          content: {
+            data: {
+              threadId: "hidden",
+              projectId: "p",
+              serverUrl: "https://bb.example.test",
+              path: "/plugins/bots/channels/room/message/job",
+            },
+          },
+        },
+      },
+    };
+    mocks.getLastNotificationResponse.mockReturnValue(
+      mode === "cold start" ? response : null,
+    );
+    try {
+      PushNotificationsHost();
+      if (mode === "live") mocks.responseListener(response);
+      await vi.waitFor(() =>
+        expect(mocks.push).toHaveBeenCalledWith({
+          pathname: "/webview",
+          params: {
+            profileId: "profile-1",
+            path: "/plugins/bots/channels/room/message/job",
+          },
+        }),
+      );
+      if (mode === "cold start")
+        expect(mocks.clearLastNotificationResponse).toHaveBeenCalled();
+    } finally {
+      mocks.getLastNotificationResponse.mockReturnValue(null);
+    }
+  },
+);

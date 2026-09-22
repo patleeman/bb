@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   parsePushNotificationData,
+  pushNotificationRoute,
   resolvePushTargetProfile,
 } from "./push-notification-target";
 
@@ -122,5 +123,57 @@ describe("resolvePushTargetProfile", () => {
         hasThread: async () => false,
       }),
     ).toBeNull();
+  });
+});
+
+describe("channel notification targets", () => {
+  const path = "/plugins/bots/channels/room-1/message/job%3A1";
+  it("routes channel taps to the correct server and channel", async () => {
+    const target = parsePushNotificationData({
+      path,
+      threadId: "hidden-thread",
+      projectId: "p",
+      serverUrl: lan.serverUrl,
+    });
+    expect(target).not.toBeNull();
+    if (!target) throw new Error("Expected channel target");
+    const hasThread = vi.fn(async () => false);
+    expect(
+      await resolvePushTargetProfile(target, {
+        profiles: [sawyer, lan],
+        activeProfileId: sawyer.id,
+        hasThread,
+      }),
+    ).toBe(lan);
+    expect(pushNotificationRoute(target)).toBe(path);
+    expect(hasThread).not.toHaveBeenCalled();
+  });
+  it("requires a matching server when a channel has no backing thread", async () => {
+    const target = parsePushNotificationData({ path, threadId: null });
+    if (!target) throw new Error("Expected channel target");
+    const hasThread = vi.fn(async () => true);
+    expect(
+      await resolvePushTargetProfile(target, {
+        profiles: [sawyer],
+        activeProfileId: sawyer.id,
+        hasThread,
+      }),
+    ).toBeNull();
+    expect(hasThread).not.toHaveBeenCalled();
+    expect(
+      await resolvePushTargetProfile(
+        { ...target, serverUrl: sawyer.serverUrl },
+        { profiles: [sawyer], activeProfileId: null, hasThread },
+      ),
+    ).toBe(sawyer);
+  });
+  it.each([
+    "https://evil.test",
+    "//evil.test",
+    "/plugins/bots/../other",
+    "/plugins/bots/channels/%2e%2e",
+    "/plugins/bots/channels/a%2fb",
+  ])("rejects invalid path %s", (path) => {
+    expect(parsePushNotificationData({ threadId: "t", path })).toBeNull();
   });
 });

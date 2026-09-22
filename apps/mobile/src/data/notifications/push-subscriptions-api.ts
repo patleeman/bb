@@ -40,7 +40,7 @@ const rpcFailureSchema = z
 
 type RpcErrorCode = z.infer<typeof rpcErrorCodeSchema>;
 type PushRpcInput =
-  | PushSubscriptionInput
+  | (PushSubscriptionInput & { serverUrl?: string })
   | { id: string }
   | Record<string, never>;
 
@@ -74,10 +74,7 @@ function mapRpcError(error: unknown): Error {
     }
     return new Error(failure.data.error);
   }
-  return new PushRpcError(
-    failure.data.error.code,
-    failure.data.error.message,
-  );
+  return new PushRpcError(failure.data.error.code, failure.data.error.message);
 }
 
 function isMissingSubscriptionError(error: Error): boolean {
@@ -156,12 +153,24 @@ export function createPushSubscriptionsApi(
 
   return {
     async register(serverUrl, input) {
-      const result = await callRpc(
-        serverUrl,
-        "pushSubscriptions.add",
-        input,
-        pushSubscriptionsAddOutputSchema,
-      );
+      let result;
+      try {
+        result = await callRpc(
+          serverUrl,
+          "pushSubscriptions.add",
+          { ...input, serverUrl },
+          pushSubscriptionsAddOutputSchema,
+        );
+      } catch (error) {
+        if (!(error instanceof PushRpcError) || error.code !== "invalid_input")
+          throw error;
+        result = await callRpc(
+          serverUrl,
+          "pushSubscriptions.add",
+          input,
+          pushSubscriptionsAddOutputSchema,
+        );
+      }
       return { subscriptionId: result.id };
     },
     async unregister(serverUrl, ref) {

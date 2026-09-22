@@ -8,9 +8,12 @@ import type { Dispatcher } from "undici";
 import { z } from "zod";
 import {
   CLIENT_NOTIFICATION_CHANNEL,
+  notificationKindPriority,
   type ClientNotification,
   type PushSubscription,
+  type SourceNotification,
 } from "./contract.js";
+import { createSourceQueue } from "./source-queue.js";
 import type { PushSubscriptionStore } from "./subscriptions.js";
 
 type ThreadResponse = PluginThreadEventPayloads["thread.idle"]["thread"];
@@ -27,12 +30,6 @@ const PUSH_TITLE_MAX_LENGTH = 80;
 const PUSH_BODY_MAX_LENGTH = 180;
 const NETWORK_WARNING_INTERVAL_MS = 60 * 60 * 1_000;
 const LAST_OUTCOME_KEY = "last-send-outcome";
-const PUSH_KIND_PRIORITY: readonly PushNotificationKind[] = [
-  "pending-interaction",
-  "thread-error",
-  "turn-finished",
-];
-
 const expoPushTicketSchema = z.union([
   z.object({ status: z.literal("ok"), id: z.string().optional() }),
   z.object({
@@ -77,7 +74,9 @@ interface PushNotificationData {
   kind: PushNotificationKind;
   projectId: string;
   serverUrl?: string;
-  threadId: string;
+  threadId: string | null;
+  path?: string;
+  id?: string;
 }
 
 export interface ExpoPushMessage {
@@ -97,6 +96,7 @@ export type PushSenderFetch = (
     headers: Record<string, string>;
     body: string;
     dispatcher: Dispatcher;
+    signal?: AbortSignal;
   },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
@@ -118,6 +118,7 @@ interface BatchResult {
 }
 
 export interface PushSender {
+  enqueue(pluginId: string, eventId: string): { ok: true };
   getLastOutcome(): LastSendOutcome;
   onInteractionPending(
     payload: PluginThreadEventPayloads["interaction.pending"],
@@ -190,7 +191,7 @@ function describePendingInteraction(interaction: PendingInteraction): string {
 function pickKind(
   kinds: ReadonlySet<PushNotificationKind>,
 ): PushNotificationKind | null {
-  for (const kind of PUSH_KIND_PRIORITY) {
+  for (const kind of notificationKindPriority) {
     if (kinds.has(kind)) return kind;
   }
   return null;
@@ -218,6 +219,7 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
   let lastNetworkWarningAt = Number.NEGATIVE_INFINITY;
   let lastOutcome: LastSendOutcome = { status: "never" };
   let running = false;
+  const sources = createSourceQueue(bb, deliver, { coalesceMs, now });
 
   async function setLastOutcome(outcome: LastSendOutcome): Promise<void> {
     lastOutcome = outcome;
@@ -330,18 +332,48 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
     }
     const resolved = await resolvePush(thread, entry);
     if (resolved === null) return;
-    const title = truncate(threadDisplayTitle(thread), PUSH_TITLE_MAX_LENGTH);
-    const body = truncate(resolved.body, PUSH_BODY_MAX_LENGTH);
+    await deliver(
+      {
+        title: threadDisplayTitle(thread),
+        body: resolved.body,
+        kind: resolved.kind,
+        threadId: thread.id,
+        projectId: thread.projectId,
+      },
+      randomUUID(),
+    );
+  }
+
+  async function deliver(
+    notice: SourceNotification,
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const title = truncate(notice.title, PUSH_TITLE_MAX_LENGTH);
+    let preview = notice.body;
+    if (notice.kind === "pending-interaction" && notice.threadId) {
+      const pending = (
+        await bb.sdk.threads.interactions.list({
+          threadId: notice.threadId,
+          signal,
+        })
+      ).find((i) => i.status === "pending");
+      if (!pending) return;
+      preview = describePendingInteraction(pending);
+    }
+    const body = truncate(firstLine(preview), PUSH_BODY_MAX_LENGTH);
     const config = await args.getDeliverySettings();
     const channels: ClientNotification["channels"] = [];
     if (config.webEnabled) channels.push("web");
     if (config.desktopEnabled) channels.push("desktop");
     if (channels.length > 0) {
       bb.realtime.publish(CLIENT_NOTIFICATION_CHANNEL, {
-        id: randomUUID(),
+        id,
         title,
         body,
-        threadId: thread.id,
+        ...(notice.coalesceKey ? { groupId: notice.coalesceKey } : {}),
+        threadId: notice.threadId,
+        ...(notice.path ? { path: notice.path } : {}),
         channels,
       } satisfies ClientNotification);
     }
@@ -356,10 +388,14 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
         title,
         body,
         data: {
-          kind: resolved.kind,
-          projectId: thread.projectId,
-          ...(serverUrl === null ? {} : { serverUrl }),
-          threadId: thread.id,
+          id,
+          kind: notice.kind,
+          projectId: notice.projectId,
+          ...(notice.path ? { path: notice.path } : {}),
+          ...((subscription.serverUrl ?? serverUrl)
+            ? { serverUrl: subscription.serverUrl ?? serverUrl! }
+            : {}),
+          threadId: notice.threadId,
         },
         sound: "default",
         channelId: "default",
@@ -369,7 +405,7 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
     let sentCount = 0;
     let failure: string | null = null;
     for (const batch of chunks(deliveries, EXPO_PUSH_BATCH_SIZE)) {
-      const result = await sendBatch(batch);
+      const result = await sendBatch(batch, signal);
       sentCount += result.sentCount;
       failure ??= result.failure;
     }
@@ -380,7 +416,10 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
     );
   }
 
-  async function sendBatch(batch: readonly Delivery[]): Promise<BatchResult> {
+  async function sendBatch(
+    batch: readonly Delivery[],
+    signal?: AbortSignal,
+  ): Promise<BatchResult> {
     const activeDispatcher = dispatcher;
     if (activeDispatcher === null) {
       return { sentCount: 0, failure: "sender is stopped" };
@@ -390,6 +429,7 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
     try {
       const response = await fetchImpl(await args.getExpoPushUrl(), {
         method: "POST",
+        ...(signal ? { signal } : {}),
         headers: {
           accept: "application/json",
           "content-type": "application/json",
@@ -472,6 +512,7 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
   }
 
   return {
+    enqueue: sources.enqueue,
     getLastOutcome: () => lastOutcome,
     onInteractionPending(payload) {
       schedule(
@@ -506,10 +547,12 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
       if (stored.success) lastOutcome = stored.data;
       dispatcher = new EnvHttpProxyAgent();
       running = true;
+      sources.start();
     },
     async stop() {
       if (!running) return;
       running = false;
+      await sources.stop();
       for (const threadId of [...pending.keys()]) cancel(threadId);
       await settle();
       const activeDispatcher = dispatcher;
